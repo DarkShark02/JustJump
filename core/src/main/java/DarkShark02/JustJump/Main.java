@@ -2,7 +2,6 @@ package DarkShark02.JustJump;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -21,7 +20,7 @@ public class Main extends ApplicationAdapter {
 
     @Override
     public void create() {
-        stage = new Stage(new FitViewport(640, 480));
+        stage = new Stage(new FitViewport(1000, 100));
         skin = new Skin(Gdx.files.internal("ui/uiskin.json"));
 
         Window window = new Window("Example screen", skin, "border");
