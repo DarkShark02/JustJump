@@ -86,3 +86,7 @@ Levels are defined as JSON files in [`assets/`](assets/) (`level1.json`, `level2
 ## Credits
 
 - Built with [libGDX](https://libgdx.com/), project generated with [gdx-liftoff](https://github.com/libgdx/gdx-liftoff).
+
+## License
+
+The source code is released under the [MIT License](LICENSE).
