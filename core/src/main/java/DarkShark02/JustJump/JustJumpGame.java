@@ -1,9 +1,12 @@
 package DarkShark02.JustJump;
 
+import java.util.ArrayList;
+import java.util.Iterator;
+
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
-import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.GL20; // Necessario per il debug delle hitbox
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Animation;
@@ -11,345 +14,276 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
-import com.badlogic.gdx.math.Rectangle;
-
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.utils.viewport.FitViewport;
+import com.badlogic.gdx.utils.viewport.Viewport;
 
 public class JustJumpGame extends ApplicationAdapter {
-    OrthographicCamera camera;
+    // Definizione della telecamera e del viewport
+    OrthographicCamera camera; // Telecamera per il mondo di gioco
+    OrthographicCamera uiCamera; // Telecamera per l'interfaccia utente (HUD)
+    Viewport viewport; 
+    
     SpriteBatch batch;
     ShapeRenderer shapeRenderer;
     BitmapFont font;
 
-    Animation<TextureRegion> walkAnimation;
-    Animation<TextureRegion> jumpAnimation;
-    Animation<TextureRegion> slipAnimation;
-    Animation<TextureRegion> hitAnimation;
+    Animation<TextureRegion> walkAnimation, jumpAnimation, slipAnimation, hitAnimation;
     Animation<TextureRegion> springAnimation;
 
     float stateTime;
 
-    float x, y;
-    float velocityY;
-    float velocityX;
-    boolean isJumping;
-    boolean isMoving;
-    boolean isSlipping;
-    boolean isHitted;
-    boolean isGameOver;
+    Player player;
+    LevelManager levelManager;
 
-    boolean starCollected;
-    boolean heartCollected;
+    // Liste per gli oggetti attivi nel livello
+    ArrayList<Spike> activeSpikes;
+    ArrayList<Star> activeStars;
+    ArrayList<Heart> activeHearts;
+    ArrayList<SnowPatch> activeSnowPatches;
+    ArrayList<Spring> activeSprings;
+    ArrayList<Bee> activeBees;
 
-    final float GRAVITY = -1000f;
-    final float JUMP_VELOCITY = 450f;
-    final float MOVEMENT_VELOCITY = 500f;
-    final float GROUND_Y = 50;
-
-    float speedMultiplier = 1f;
-    float starEffectTimer = 0f;
-
-    Texture walkA, walkB, jump, slip, spikes, hit, star, heart, snow, spring, springOut;
+    // Texture di sfondo e UI
     Texture grass, dirt, sky;
+    Texture heartUITexture;
+    Texture halfHeartUITexture; // Texture per il cuore a metà
+    Texture starIconTexture; // Texture per l'icona della stella UI
 
-    Rectangle playerRect;
-    Rectangle spikesRect;
-    Rectangle starRect, heartRect, snowRect, springRect;
-    Rectangle playerFeetRect = new Rectangle();
+    // Costanti di gioco
+    public static final float GROUND_Y = 50;
+    public static final int TILE_SIZE = 64;
+    // Queste SCREEN_WIDTH e SCREEN_HEIGHT ora rappresentano la DIMENSIONE DELLA TUA FINESTRA VIRTUALE,
+    // ovvero quanto del mondo è visibile in un dato momento. NON più la larghezza totale del livello.
+    public static final int SCREEN_WIDTH = 1600; // Larghezza della viewport virtuale
+    public static final int SCREEN_HEIGHT = 900; // Altezza della viewport virtuale
 
-    final int MAX_HEALTH = 3;
-    int currentHealth = MAX_HEALTH;
+    // Larghezza del mondo (Verrà aggiornata dal LevelManager in base al livello caricato)
+    public float currentLevelWidth; 
+    
+    int rows = (int) (SCREEN_HEIGHT / TILE_SIZE); 
+    
+    int[][] backgroundTiles; // Matrice di sfondo inizializzata in resetGameForLevel
 
-    float damageCooldown = 0;
-    float hitDuration = 0;
-
-    float springEffectTimer = 0f;
-    boolean springActive = false;
-
-    float springBoost = 0f;
-    final float SPRING_BOOST_VELOCITY = 600f;
-
-    int TILE_SIZE = 64;  // dimensione di ogni pezzo
-    int SCREEN_WIDTH = 1600;
-    int SCREEN_HEIGHT = 900;
-
-    int rows = SCREEN_HEIGHT / TILE_SIZE;   // es: 900 / 64 = 14 righe circa
-    int cols = SCREEN_WIDTH / TILE_SIZE;    // es: 1600 / 64 = 25 colonne circa
-
-    // Una matrice che contiene l'id del tile per ogni cella
-    int[][] backgroundTiles = new int[rows][cols];
-
-    Texture beeA, beeB;
-    Rectangle beeRect;
-    boolean beeHit = false;
-    float beeSpeed = 200f;  // velocità orizzontale dell’ape
-    float beeSpawnTimer = 0f;
-    final float BEE_SPAWN_INTERVAL = 5f;
-
+    int beesDefeated = 0;
 
     @Override
     public void create() {
+        // --- Inizializzazione telecamera e viewport ---
         camera = new OrthographicCamera();
-        camera.setToOrtho(false, 1600, 900);
+        viewport = new FitViewport(SCREEN_WIDTH, SCREEN_HEIGHT, camera);
+        viewport.apply(); 
+        
+        // --- Inizializzazione UI Camera ---
+        uiCamera = new OrthographicCamera();
+        uiCamera.setToOrtho(false, SCREEN_WIDTH, SCREEN_HEIGHT); // (0,0) in basso a sinistra, dimensioni virtuali fisse
+        uiCamera.update();
+        // --- Fine inizializzazione telecamera e viewport ---
+
         batch = new SpriteBatch();
         shapeRenderer = new ShapeRenderer();
-        font = new BitmapFont();  // font di default
-        font.getData().setScale(3f); // scala più grande per testo visibile
+        font = new BitmapFont();
+        font.getData().setScale(0.8f);
 
+        // Inizializza le liste degli oggetti di gioco
+        activeSpikes = new ArrayList<>();
+        activeStars = new ArrayList<>();
+        activeHearts = new ArrayList<>();
+        activeSnowPatches = new ArrayList<>();
+        activeSprings = new ArrayList<>();
+        activeBees = new ArrayList<>();
 
+        loadTextures();
+        initializeAnimations();
+
+        player = new Player(GROUND_Y);
+
+        levelManager = new LevelManager(this);
+        levelManager.loadCurrentLevel();
+    }
+
+    private void loadTextures() {
         grass = new Texture("background_solid_grass.png");
         dirt = new Texture("background_solid_dirt.png");
         sky = new Texture("background_solid_sky.png");
-        beeRect = new Rectangle(-100, 100, 60, 50);  // fuori schermo, dimensioni esempio
-        beeHit = false;
+        heartUITexture = new Texture("hud_heart.png");
+        halfHeartUITexture = new Texture("hud_heart_half.png"); // Carica la texture del mezzo cuore
+        starIconTexture = new Texture("star.png"); 
+    }
+
+    private void initializeAnimations() {
+        walkAnimation = new Animation<>(0.3f, new TextureRegion(new Texture("character_yellow_walk_a.png")), new TextureRegion(new Texture("character_yellow_walk_b.png")));
+        walkAnimation.setPlayMode(Animation.PlayMode.LOOP);
+        jumpAnimation = new Animation<>(0.3f, new TextureRegion(new Texture("character_yellow_jump.png")));
+        slipAnimation = new Animation<>(0.3f, new TextureRegion(new Texture("character_yellow_duck.png")));
+        hitAnimation = new Animation<>(0.5f, new TextureRegion(new Texture("character_yellow_hit.png")));
+
+        springAnimation = new Animation<>(0.5f, new TextureRegion(new Texture("spring.png")));
+    }
+
+    public void resetGameForLevel(LevelData levelData) {
+        player.reset();
+        player.x = levelData.playerStartX;
+        player.y = levelData.playerStartY;
+
+        disposeCurrentLevelObjects(); // Dispone le texture degli oggetti del livello precedente
+
+        activeSpikes.clear();
+        activeStars.clear();
+        activeHearts.clear();
+        activeSnowPatches.clear();
+        activeSprings.clear();
+        activeBees.clear();
+
+        beesDefeated = 0;
+        
+        // --- Imposta la larghezza del livello corrente dal LevelData ---
+        currentLevelWidth = levelData.levelWidth; 
+        // --- Fine modifica ---
+
+        // Inizializza backgroundTiles basandosi sulla larghezza del livello
+        int colsInLevel = (int) (currentLevelWidth / TILE_SIZE); 
+        backgroundTiles = new int[rows][colsInLevel]; 
 
         for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
+            for (int c = 0; c < colsInLevel; c++) { 
                 if (r < rows - 3) {
-                    backgroundTiles[r][c] = 2; // cielo (sky)
+                    backgroundTiles[r][c] = 2; // Sky
                 } else {
-                    backgroundTiles[r][c] = 0; // erba (grass)
+                    backgroundTiles[r][c] = levelData.backgroundType; // 0=Grass, 1=Dirt
                 }
             }
         }
 
-        loadTextures();
-        initializeAnimations();
-        resetGame();
+        // Aggiungi oggetti dal LevelData alle liste attive
+        for (LevelData.SpikeData sd : levelData.spikes) {
+            activeSpikes.add(new Spike(sd.x, sd.y, 50, 15, new Texture("spikes.png")));
+        }
+        for (LevelData.HeartData hd : levelData.hearts) {
+            activeHearts.add(new Heart(hd.x, hd.y, 40, 40, new Texture("heart.png")));
+        }
+        for (LevelData.StarData std : levelData.stars) {
+            activeStars.add(new Star(std.x, std.y, 40, 40, new Texture("star.png")));
+        }
+        for (LevelData.SnowPatchData snd : levelData.snowPatches) {
+            activeSnowPatches.add(new SnowPatch(snd.x, snd.y, snd.width, snd.height, new Texture("snow.png")));
+        }
+        for (LevelData.SpringData spd : levelData.springs) {
+            activeSprings.add(new Spring(spd.x, spd.y, 50, 50, new Texture("spring.png"), new Texture("spring_out.png")));
+        }
+        for (LevelData.BeeData bd : levelData.bees) {
+            activeBees.add(new Bee(bd.x, bd.y, bd.initialVelocityX));
+        }
     }
 
-    private void loadTextures() {
-        walkA = new Texture(Gdx.files.internal("character_yellow_walk_a.png"));
-        walkB = new Texture(Gdx.files.internal("character_yellow_walk_b.png"));
-        jump = new Texture(Gdx.files.internal("character_yellow_jump.png"));
-        slip = new Texture(Gdx.files.internal("character_yellow_duck.png"));
-        spikes = new Texture(Gdx.files.internal("spikes.png"));
-        hit = new Texture(Gdx.files.internal("character_yellow_hit.png"));
-        star = new Texture(Gdx.files.internal("star.png"));
-        heart = new Texture(Gdx.files.internal("heart.png"));
-        snow = new Texture(Gdx.files.internal("snow.png"));
-        spring = new Texture(Gdx.files.internal("spring.png"));
-        springOut = new Texture(Gdx.files.internal("spring_out.png"));
-        beeA = new Texture(Gdx.files.internal("bee_a.png"));
-        beeB = new Texture(Gdx.files.internal("bee_rest.png"));
-
-    }
-
-    private void initializeAnimations() {
-        walkAnimation = new Animation<>(0.3f, new TextureRegion(walkA), new TextureRegion(walkB));
-        walkAnimation.setPlayMode(Animation.PlayMode.LOOP);
-        jumpAnimation = new Animation<>(0.3f, new TextureRegion(jump));
-        slipAnimation = new Animation<>(0.3f, new TextureRegion(slip));
-        hitAnimation = new Animation<>(0.5f, new TextureRegion(hit));
-        springAnimation = new Animation<>(0.5f, new TextureRegion(spring));
-    }
-
-    private void resetGame() {
-        x = 100;
-        y = GROUND_Y;
-        velocityY = 0;
-        velocityX = 0;
-        isJumping = false;
-        isMoving = false;
-        isSlipping = false;
-        isHitted = false;
-        isGameOver = false;
-
-        playerRect = new Rectangle();
-        spikesRect = new Rectangle(700, GROUND_Y, 50, 50);
-        starRect = new Rectangle(900, GROUND_Y, 40, 40);
-        heartRect = new Rectangle(400, GROUND_Y, 40, 40);
-        snowRect = new Rectangle(1100, GROUND_Y, 100, 50);
-        springRect = new Rectangle(200, GROUND_Y, 50, 50);
-
-        currentHealth = MAX_HEALTH;
-        starCollected = false;
-        heartCollected = false;
-        starEffectTimer = 0f;
-        speedMultiplier = 1f;
-
-        stateTime = 0f;
-        damageCooldown = 0f;
-        hitDuration = 0f;
+    // Metodo per disporre le texture degli oggetti del livello precedente
+    private void disposeCurrentLevelObjects() {
+        for (Spike s : activeSpikes) s.dispose();
+        for (Star s : activeStars) s.dispose();
+        for (Heart h : activeHearts) h.dispose();
+        for (SnowPatch s : activeSnowPatches) s.dispose();
+        for (Spring s : activeSprings) s.dispose();
+        for (Bee b : activeBees) b.dispose();
     }
 
     @Override
     public void render() {
         float delta = Gdx.graphics.getDeltaTime();
         stateTime += delta;
-        damageCooldown -= delta;
-        hitDuration -= delta;
 
-        if (!isGameOver) {
-            handleInput(delta);
-            updatePhysics(delta);
+        if (!player.isGameOver) {
+            player.handleInput(delta, (int) currentLevelWidth); // Passa la larghezza del livello al player
+            player.update(delta);
             checkCollisions(delta);
+            player.updateInvulnerability(delta);
+
+            // --- Aggiorna la posizione della telecamera per seguire il player ---
+            camera.position.x = MathUtils.clamp(player.x + player.getWidth() / 2, 
+                                                SCREEN_WIDTH / 2, 
+                                                currentLevelWidth - SCREEN_WIDTH / 2);
+            camera.update(); 
+            // --- Fine aggiornamento telecamera ---
+
+            if (levelManager.getCurrentLevelData() != null && player.x >= levelManager.getCurrentLevelData().exitX) {
+                levelManager.goToNextLevel();
+            }
+
+            updateBees(delta);
         } else if (Gdx.input.isKeyJustPressed(Input.Keys.R)) {
-            resetGame();
+            levelManager.resetLevelIndex();
+            levelManager.loadCurrentLevel();
+            player.isGameOver = false;
         }
 
-        beeSpawnTimer += delta;
-        if (beeSpawnTimer >= BEE_SPAWN_INTERVAL && beeRect.x < 0) {
-            spawnBee();
-        }
-        if (beeRect.x >= -100) {
-            updateBee(delta);
-        }
         drawGame();
     }
 
-    private void handleInput(float delta) {
-    isMoving = false;
-    velocityX = 0;
+    private void updateBees(float deltaTime) {
+        Iterator<Bee> iterator = activeBees.iterator();
+        while (iterator.hasNext()) {
+            Bee bee = iterator.next();
+            bee.update(deltaTime);
 
-    isSlipping = Gdx.input.isKeyPressed(Input.Keys.DOWN) && !isJumping;
-
-    if (Gdx.input.isKeyPressed(Input.Keys.RIGHT)) {
-        velocityX = MOVEMENT_VELOCITY * speedMultiplier;
-        isMoving = true;
-    } else if (Gdx.input.isKeyPressed(Input.Keys.LEFT)) {
-        velocityX = -MOVEMENT_VELOCITY * speedMultiplier;
-        isMoving = true;
-    }
-
-    if (isMoving) {
-        x += velocityX * delta;
-        float playerWidth = 80;
-        if (x < 0) x = 0;
-        if (x + playerWidth > camera.viewportWidth) x = camera.viewportWidth - playerWidth;
-    }
-
-    // SALTO: non moltiplichiamo più per speedMultiplier
-    if (Gdx.input.isKeyJustPressed(Input.Keys.UP) && !isJumping) {
-        velocityY = JUMP_VELOCITY;
-        isJumping = true;
-    }
-}
-
-    private void updatePhysics(float delta) {
-        velocityY += GRAVITY * delta;
-
-        if (springBoost > 0) {
-            velocityY = springBoost; // assegna il boost
-            springBoost = 0;         // resetta il boost subito dopo averlo usato
-        }
-
-        y += velocityY * delta;
-
-        if (y <= GROUND_Y) {
-            y = GROUND_Y;
-            velocityY = 0;
-            isJumping = false;
-        }
-
-
-        // Aggiorna timer effetto stella
-        if (starEffectTimer > 0) {
-            starEffectTimer -= delta;
-            if (starEffectTimer <= 0) {
-                speedMultiplier = 1f;
-                starEffectTimer = 0;
-            }
-        }
-
-        if (springEffectTimer > 0) {
-            springEffectTimer -= delta;
-            if (springEffectTimer <= 0) {
-                springEffectTimer = 0;
-                springActive = false;
+            // Rimuovi l'ape se è fuori dallo schermo (a sinistra) VISIBILE, o se colpita e il timer è scaduto
+            if (bee.x < camera.position.x - SCREEN_WIDTH / 2 - bee.getRect().width || (bee.isHit() && bee.getDespawnTimer() <= 0)) {
+                bee.dispose();
+                iterator.remove();
             }
         }
     }
 
     private void checkCollisions(float delta) {
-        float playerWidth = 80;
-        float playerHeight = isSlipping ? 90 : 120;
+        boolean playerIsInvulnerable = player.isInvulnerable();
 
-        playerRect.set(x, y, playerWidth, playerHeight);
-
-        // Hitbox piedi: base stretta e molto bassa, posizione y al suolo del player
-        playerFeetRect.set(x + 10, y, playerWidth - 20, 15); // 15px altezza, lascia margine ai lati
-
-        // Hitbox spikes: più bassa (esempio 15 px)
-        spikesRect.set(700, GROUND_Y, 50, 15);
-
-        // Collisione piedi con spikes
-        if (playerFeetRect.overlaps(spikesRect) && damageCooldown <= 0) {
-            currentHealth--;
-            if (currentHealth <= 0) {
-                currentHealth = 0;
-                isGameOver = true;
+        for (Spike spike : activeSpikes) {
+            if (player.getRect().overlaps(spike.getRect()) && !playerIsInvulnerable) {
+                player.takeDamage(0.5f);
             }
-            isHitted = true;
-            hitDuration = 0.5f;
-            damageCooldown = 1f;
-        } else if (hitDuration <= 0) {
-            isHitted = false;
         }
-
-        // Cuore
-        if (playerRect.overlaps(heartRect) && !heartCollected) {
-            if (currentHealth < MAX_HEALTH) {
-                currentHealth++;
-                heartCollected = true;
+        
+        for (Heart heart : activeHearts) {
+            // Controlla se il cuore non è già stato raccolto e se la vita del player non è al massimo
+            if (player.getRect().overlaps(heart.getRect()) && !heart.isCollected() && player.currentHealth < player.MAX_HEALTH) {
+                player.collectHeart();
+                heart.setCollected(true);
             }
         }
 
-        // Stella
-        if (playerRect.overlaps(starRect) && !starCollected) {
-            starCollected = true;
-            starEffectTimer = 10f;
-            speedMultiplier = 1.2f;
+        for (Star star : activeStars) {
+            if (player.getRect().overlaps(star.getRect()) && !star.isCollected()) {
+                player.collectStar();
+                star.setCollected(true);
+            }
         }
 
-        // Neve (malus solo quando sopra)
-        if (playerFeetRect.overlaps(snowRect)) {
-            speedMultiplier = (starEffectTimer > 0) ? 1.2f : 0.8f;
-        } else if (starEffectTimer <= 0) {
-            speedMultiplier = 1f;
+        boolean onAnySnowThisFrame = false;
+        for (SnowPatch snowPatch : activeSnowPatches) {
+            if (player.getFeetRect().overlaps(snowPatch.getRect())) {
+                onAnySnowThisFrame = true;
+                break;
+            }
+        }
+        player.setOnSnow(onAnySnowThisFrame);
+
+        for (Spring spring : activeSprings) {
+            spring.update(delta);
+            if (player.getRect().overlaps(spring.getRect()) && !spring.isActive()) {
+                player.bounceSpring();
+                spring.activate();
+            }
         }
 
-        // Pedana 
-        if (playerRect.overlaps(springRect) && !springActive) {
-            springBoost = SPRING_BOOST_VELOCITY;
-            isJumping = true;
-            springEffectTimer = 0.5f;
-            springActive = true;
-        }
-
-        // Gestione ape
-        if (beeRect.x >= 0) { // se è visibile a schermo
-            if (playerRect.overlaps(beeRect)) {
-                if (!beeHit) {
-                    // Controllo se colpito da sopra (il player deve essere sopra l’ape e stia scendendo)
-                    if (y > beeRect.y + beeRect.height - 10 && velocityY < 0) {
-                        beeHit = true;
-                        velocityY = JUMP_VELOCITY * 1.2f;  // slancio leggero in salto
-                    } else {
-                        // Colpito da lato o sotto -> perde vita
-                        if (damageCooldown <= 0) {
-                            currentHealth--;
-                            damageCooldown = 1f;
-                            if (currentHealth <= 0) {
-                                currentHealth = 0;
-                                isGameOver = true;
-                            }
-                        }
+        for (Bee bee : activeBees) {
+            if (!bee.isHit()) { 
+                if (player.getRect().overlaps(bee.getRect())) {
+                    if (player.isFallingOn(bee.getRect())) {
+                        bee.hit();
+                        beesDefeated++;
+                        player.bounceOffEnemy();
+                    } else if (!playerIsInvulnerable) {
+                        player.takeDamage(1);
                     }
                 }
-            }
-        }
-    }
-
-    private void drawBackground() {
-        for (int r = 0; r < backgroundTiles.length; r++) {
-            for (int c = 0; c < backgroundTiles[r].length; c++) {
-                Texture tileTexture = null;
-                switch (backgroundTiles[r][c]) {
-                    case 0: tileTexture = grass; break;
-                    case 1: tileTexture = dirt; break;
-                    case 2: tileTexture = sky; break;
-                }
-                batch.draw(tileTexture, c * TILE_SIZE, SCREEN_HEIGHT - (r + 1) * TILE_SIZE);
             }
         }
     }
@@ -358,117 +292,181 @@ public class JustJumpGame extends ApplicationAdapter {
         Gdx.gl.glClearColor(0.1f, 0.1f, 0.1f, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
-        camera.update();
-        batch.setProjectionMatrix(camera.combined);
-        shapeRenderer.setProjectionMatrix(camera.combined);
-
+        // --- Disegno degli oggetti del mondo (seguono la telecamera) ---
+        batch.setProjectionMatrix(camera.combined); 
         batch.begin();
+        drawBackground(); 
 
-        drawBackground();
+        player.draw(batch, stateTime, walkAnimation, jumpAnimation, slipAnimation, hitAnimation);
 
-        TextureRegion currentFrame;
-        if (isGameOver) {
-            currentFrame = hitAnimation.getKeyFrame(0);
-        } else if (isHitted) {
-            currentFrame = hitAnimation.getKeyFrame(stateTime, true);
-        } else if (isJumping) {
-            currentFrame = jumpAnimation.getKeyFrame(stateTime);
-        } else if (isSlipping) {
-            currentFrame = slipAnimation.getKeyFrame(stateTime);
-        } else if (isMoving) {
-            currentFrame = walkAnimation.getKeyFrame(stateTime);
-        } else {
-            currentFrame = walkAnimation.getKeyFrame(0);
+        for (Spike s : activeSpikes) s.draw(batch);
+        for (Star s : activeStars) { if (!s.isCollected()) s.draw(batch); }
+        for (Heart h : activeHearts) { if (!h.isCollected()) h.draw(batch); }
+        for (SnowPatch s : activeSnowPatches) s.draw(batch);
+        for (Spring s : activeSprings) s.draw(batch, stateTime, springAnimation);
+        for (Bee b : activeBees) b.draw(batch);
+
+        // Visualizza l'icona della stella sopra il player se l'effetto è attivo
+        if (player.hasStarEffect()) {
+            batch.draw(starIconTexture, player.x + 20, player.y + player.getHeight(), 30, 30);
+        }
+        
+        batch.end(); // Termina il batch per gli oggetti del mondo
+
+        // --- Disegno dell'interfaccia utente (UI) (fissa sullo schermo) ---
+        batch.setProjectionMatrix(uiCamera.combined); // Imposta la matrice di proiezione della UI Camera
+        batch.begin(); // Inizia un nuovo batch per l'UI
+
+        // Calcola la posizione iniziale x per allineare a destra.
+        // SCREEN_WIDTH e SCREEN_HEIGHT sono le dimensioni della viewport virtuale della UI camera.
+        // 40 è la dimensione stimata del cuore + spazio, 20 è un piccolo margine dal bordo.
+        float heartUIStartX1 = 20; // 20 pixel di margine dal bordo sinistro
+
+        for (int i = 0; i < player.MAX_HEALTH; i++) {
+            Texture heartToDraw;
+            
+            if (player.currentHealth >= i + 1.0f) { 
+                heartToDraw = heartUITexture;
+            } else if (player.currentHealth > i && player.currentHealth < i + 1.0f) { 
+                heartToDraw = halfHeartUITexture; 
+            } else { 
+                continue; 
+            }
+            
+            // Disegna i cuori partendo da heartUIStartX
+            // La posizione Y (SCREEN_HEIGHT - 50) è già corretta per metterli in alto
+            batch.draw(heartToDraw, heartUIStartX1 + i * 40, SCREEN_HEIGHT - 50, 30, 30);
         }
 
-        float playerWidth = 80;
-        float playerHeight = isSlipping ? 90 : 120;
-        batch.draw(currentFrame, x, y, playerWidth, playerHeight);
+        // Sposta anche il contatore delle api e la vita testuale
+        font.draw(batch, "Bees Defeated: " + beesDefeated, heartUIStartX1, SCREEN_HEIGHT - 100); 
+        font.draw(batch, "Health: " + String.format("%.1f", player.currentHealth), heartUIStartX1, SCREEN_HEIGHT - 150); 
 
-        // Stella sopra la testa se attiva
-        if (starEffectTimer > 0) {
-            batch.draw(star, x + 20, y + playerHeight, 30, 30);
+        if (player.isGameOver) {
+            // Centra il testo "GAME OVER" sullo schermo virtuale dell'UI
+            String gameOverText = "GAME OVER! Press R to restart";
+            com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout(font, gameOverText);
+            float textWidth = layout.width;
+            font.draw(batch, gameOverText, (SCREEN_WIDTH - textWidth) / 2, SCREEN_HEIGHT / 2);
         }
+        
+        batch.end(); // Termina il batch per l'UI
 
-        if (springActive) {
-            batch.draw(springOut, springRect.x, springRect.y, springRect.width, springRect.height);
-        } else {
-            batch.draw(spring, springRect.x, springRect.y, springRect.width, springRect.height);
+        // --- DEBUG DELLE HITBOX (Mantenerlo attivo durante lo sviluppo) ---
+        // Rimettere la proiezione della telecamera del mondo per il debug delle hitbox
+        /*
+        shapeRenderer.setProjectionMatrix(camera.combined); 
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+
+        shapeRenderer.setColor(Color.RED);
+        shapeRenderer.rect(player.getRect().x, player.getRect().y, player.getRect().width, player.getRect().height);
+        
+        shapeRenderer.setColor(Color.GREEN);
+        shapeRenderer.rect(player.getFeetRect().x, player.getFeetRect().y, player.getFeetRect().width, player.getFeetRect().height);
+        
+        shapeRenderer.setColor(Color.BLUE);
+        for (Bee bee : activeBees) {
+            if (bee.getDespawnTimer() > 0) // Disegna solo se l'ape non è "morta"
+                shapeRenderer.rect(bee.getRect().x, bee.getRect().y, bee.getRect().width, bee.getRect().height);
         }
-
-        // Oggetti
-        batch.draw(spikes, spikesRect.x, spikesRect.y, spikesRect.width, spikesRect.height);
-        if (!starCollected) batch.draw(star, starRect.x, starRect.y, starRect.width, starRect.height);
-        if (!heartCollected) batch.draw(heart, heartRect.x, heartRect.y, heartRect.width, heartRect.height);
-        batch.draw(snow, snowRect.x, snowRect.y, snowRect.width, snowRect.height);
-
-        // Cuori
-        for (int i = 0; i < currentHealth; i++) {
-            batch.draw(heart, 20 + i * 40, 670, 30, 30);
+        
+        shapeRenderer.setColor(Color.YELLOW);
+        for (Spike s : activeSpikes) shapeRenderer.rect(s.getRect().x, s.getRect().y, s.getRect().width, s.getRect().height);
+        
+        shapeRenderer.setColor(Color.CYAN);
+        for (Heart h : activeHearts) {
+            if (!h.isCollected())
+                shapeRenderer.rect(h.getRect().x, h.getRect().y, h.getRect().width, h.getRect().height);
         }
+        
+        shapeRenderer.setColor(Color.MAGENTA);
+        for (Star s : activeStars) {
+            if (!s.isCollected())
+                shapeRenderer.rect(s.getRect().x, s.getRect().y, s.getRect().width, s.getRect().height);
+        }
+        
+        shapeRenderer.setColor(Color.GRAY);
+        for (SnowPatch s : activeSnowPatches) shapeRenderer.rect(s.getRect().x, s.getRect().y, s.getRect().width, s.getRect().height);
+        
+        shapeRenderer.setColor(Color.ORANGE);
+        for (Spring s : activeSprings) shapeRenderer.rect(s.getRect().x, s.getRect().y, s.getRect().width, s.getRect().height);
 
-        // Disegna ape
-        if (beeRect.x >= 0) {
-            if (beeHit) {
-                batch.draw(beeB, beeRect.x, beeRect.y, beeRect.width, beeRect.height);
-            } else {
-                batch.draw(beeA, beeRect.x, beeRect.y, beeRect.width, beeRect.height);
+        shapeRenderer.end();
+        */
+    }
+
+    private void drawBackground() {
+        float startX = camera.position.x - (SCREEN_WIDTH / 2);
+        int startCol = (int) (startX / TILE_SIZE);
+        int endCol = (int) ((startX + SCREEN_WIDTH) / TILE_SIZE) + 1;
+        
+        // Assicurati di non andare fuori dai limiti della matrice backgroundTiles
+        startCol = MathUtils.clamp(startCol, 0, backgroundTiles[0].length);
+        endCol = MathUtils.clamp(endCol, 0, backgroundTiles[0].length);
+
+        for (int r = 0; r < rows; r++) {
+            for (int c = startCol; c < endCol; c++) { 
+                Texture tile;
+                switch (backgroundTiles[r][c]) {
+                    case 0: tile = grass; break;
+                    case 1: tile = dirt; break;
+                    case 2: tile = sky; break;
+                    default: tile = null; break;
+                }
+                if (tile != null) {
+                    batch.draw(tile, c * TILE_SIZE, SCREEN_HEIGHT - (r + 1) * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                }
             }
         }
-
-        batch.end();
-
-        // Messaggio Game Over
-        if (isGameOver) {
-            batch.begin();
-             // disegna rettangolo nero a tutto schermo
-            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-            shapeRenderer.setColor(0, 0, 0, 1);
-            shapeRenderer.rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-            shapeRenderer.end();
-
-            String gameOverText = "Premi R per riprovare";
-            // misura la larghezza del testo per centrarlo orizzontalmente
-            float textWidth = font.getRegion().getRegionWidth() * font.getData().scaleX;
-            // ma meglio calcolare usando GlyphLayout:
-            com.badlogic.gdx.graphics.g2d.GlyphLayout layout = new com.badlogic.gdx.graphics.g2d.GlyphLayout(font, gameOverText);
-            font.draw(batch, gameOverText, (SCREEN_WIDTH - layout.width) / 2, SCREEN_HEIGHT / 2);
-
-            batch.end();
-        }
     }
 
-    private void spawnBee() {
-        float randomY = GROUND_Y + 100 + (float) Math.random() * 200; // da 150 a 250 se GROUND_Y=50
-        beeRect.set(-60, randomY, 60, 50);
-        beeHit = false;
-        System.out.println("Bee spawned at X: " + beeRect.x + ", Y: " + beeRect.y);
+    @Override
+    public void resize(int width, int height) {
+        viewport.update(width, height, true); 
+        // Se la tua UI Camera deve ridimensionarsi con la finestra, potresti voler aggiornarla qui.
+        // Ad esempio: uiCamera.setToOrtho(false, width, height); uiCamera.update();
+        // Ma con FitViewport e UI virtuale, è meglio lasciare SCREEN_WIDTH/HEIGHT per coerenza.
     }
 
+    @Override
+    public void pause() { }
 
-    private void updateBee(float delta) {
-        if (beeRect.x > SCREEN_WIDTH) {
-            beeRect.x = -100; // fuori schermo
-            beeHit = false;
-            beeSpawnTimer = 0f; // reset timer per nuovo spawn!
-        } else {
-            beeRect.x += beeSpeed * delta;  // si muove verso destra
-        }
-    }
+    @Override
+    public void resume() { }
 
     @Override
     public void dispose() {
         batch.dispose();
         shapeRenderer.dispose();
-        walkA.dispose();
-        walkB.dispose();
-        jump.dispose();
-        slip.dispose();
-        spikes.dispose();
-        hit.dispose();
-        star.dispose();
-        heart.dispose();
-        snow.dispose();
         font.dispose();
+
+        grass.dispose();
+        dirt.dispose();
+        sky.dispose();
+        heartUITexture.dispose();
+        halfHeartUITexture.dispose(); // Disponi anche la texture del cuore a metà
+        starIconTexture.dispose(); 
+
+        // Disporre le texture delle animazioni del player
+        if (walkAnimation.getKeyFrames().length > 0) {
+            for (TextureRegion region : walkAnimation.getKeyFrames()) {
+                if (region.getTexture() != null) region.getTexture().dispose();
+            }
+        }
+        if (jumpAnimation.getKeyFrames().length > 0) {
+            if (jumpAnimation.getKeyFrames()[0].getTexture() != null) jumpAnimation.getKeyFrames()[0].getTexture().dispose();
+        }
+        if (slipAnimation.getKeyFrames().length > 0) {
+            if (slipAnimation.getKeyFrames()[0].getTexture() != null) slipAnimation.getKeyFrames()[0].getTexture().dispose();
+        }
+        if (hitAnimation.getKeyFrames().length > 0) {
+            if (hitAnimation.getKeyFrames()[0].getTexture() != null) hitAnimation.getKeyFrames()[0].getTexture().dispose();
+        }
+        
+        if (springAnimation.getKeyFrames().length > 0) {
+            if (springAnimation.getKeyFrames()[0].getTexture() != null) springAnimation.getKeyFrames()[0].getTexture().dispose();
+        }
+
+        disposeCurrentLevelObjects(); // Dispone gli oggetti del livello corrente
     }
 }
